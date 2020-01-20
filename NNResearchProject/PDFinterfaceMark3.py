@@ -9,6 +9,12 @@ from pdfminer.converter import TextConverter
 from io import StringIO
 from pdfminer.layout import LAParams
 import math
+
+from keras.models import Sequential
+from keras.layers import Dense
+from functions import convert_dic_to_vector
+from config import max_letters, language_tags
+import numpy as np
 '''
 Mark 2 Plan:
 	1: Import PDF. Condense into text
@@ -28,8 +34,19 @@ Mark 2 Plan:
 
 '''
 
+network = Sequential()
+network.add(Dense(200, input_dim=128*max_letters - 1, activation='sigmoid'))
+network.add(Dense(150, activation='sigmoid'))
+network.add(Dense(100, activation='sigmoid'))
+network.add(Dense(100, activation='sigmoid'))
+network.add(Dense(len(language_tags), activation='softmax'))
+network.load_weights('weightslang.hdf5')
+network.compile(loss='binary_crossentropy', optimizer='sgd', metrics=['accuracy'])
+
+
+
 mathchar = ['+', '-', '*', '/', '\u00F7']
-removechar = ['\t', '\n', '.', ',', ';', ':']
+removechar = ['\t', '.', ',', ';', ':', '/r']
 
 output = """\\documentclass{article}[11pt]
 \\begin{document}
@@ -72,7 +89,7 @@ for page in PDFPage.get_pages(fp, set(), 0, "", True, check_extractable=True):
 
 text = retstr.getvalue()
 
-print(text)
+#print(text)
 
 pageLength = len(text)
 
@@ -81,33 +98,46 @@ testString = ""
 spacing = 3
 
 for rchr in removechar:
-	text.replace(rchr, ".")
-while i < pageLength:
-	if i > spacing and i < (pageLength - spacing):
-		print(str(i - spacing) + " to " + str(i+spacing))
-		testString = text[i-spacing:i+spacing]
-	elif i <= spacing:
-		print("To" + str(i+spacing))
-		testString = text[:i+spacing]
-	else:
-		print("From" + str(i-spacing))
-		testString = text[i-spacing:]
-	isMaths = isCharacterMaths(testString)
-	if isMaths == False:
-		text = text[:i] + "." + text[i+1:]
-	i = i + 1
-	#print("Text " + str(i) + " :" + text)
+        text.replace(rchr, " ")
 
-print(text)
-formulae = text.split(".")
 
+replaceString = text.split(" ")
+i = 0
+dic =[]
+
+print(replaceString)
+formulae = []
+for remove in replaceString:
+	dic = []
+	dic.append(remove)
+	vct_str = convert_dic_to_vector(dic, max_letters)
+	vct = np.zeros((1, 128 * max_letters - 1))
+	count = 0
+	for digit in vct_str[0]:
+		if count == 128 * (max_letters - 1):
+			break
+		vct[0,count] = int(digit)
+		count += 1
+	prediction_vct = network.predict(vct)
+
+	langs = list(language_tags.keys())
+	for i in range(len(language_tags)):
+		lang = langs[i]
+		score = prediction_vct[0][i]
+		print(remove + " " + lang + ': ' + str(round(100*score, 2)) + '%')
+		if(lang == "en"):
+			if(round(100*score,2) > 10.0):
+				print("Removed A Word!")
+				break
+			else:
+				formulae.append(remove)
 print("New Text: ")
 formulae = list(filter(None, formulae))
 print(formulae)
 
-for formula in formulae:
-	output = output + "$" + formula + "$" + "\n"
+formula = " ".join(formulae)
 
+output = output + "$" + formula + "$"
 outputFile = open("output.tex", "w")
 
 output = output + "\\end{document}"
@@ -116,3 +146,4 @@ outputFile.write(output)
 
 fp.close()
 outputFile.close()
+
